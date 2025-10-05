@@ -1,0 +1,22 @@
+services:
+  postgres:
+    container_name: pg
+    image: pgvector/pgvector:pg18-trixie
+    environment:
+      - POSTGRES_USER=test
+      - POSTGRES_PASSWORD=123456
+      - POSTGRES_DB=test_db
+    ports:
+      - "5432:5432"
+    restart: always
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U test -d test_db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
