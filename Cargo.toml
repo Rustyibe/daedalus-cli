@@ -34,3 +34,8 @@ tempdir = "0.3.7"
 [[bin]]
 name = "daedalus-cli"
 path = "src/main.rs"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
