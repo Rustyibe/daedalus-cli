@@ -14,28 +14,19 @@ on:
         type: string
         default: 'Automated release'
 
-env:
-  CARGO_NET_GIT_FETCH_WITH_CLI: true
-
 jobs:
-  build-matrix:
-    name: Build for ${{ matrix.platform.name }}
-    runs-on: ${{ matrix.platform.runner }}
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        platform:
-          - name: Linux x86_64
-            runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            asset_suffix: linux-x86_64
-          - name: macOS x86_64
-            runner: macos-latest
-            target: x86_64-apple-darwin
-            asset_suffix: macos-x86_64
-          - name: Windows x86_64
-            runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            asset_suffix: windows-x86_64.exe
+        include:
+          - os: ubuntu-latest
+            asset_name: linux
+          - os: windows-latest
+            asset_name: windows
+          - os: macos-latest
+            asset_name: macos
 
     steps:
     - name: Checkout code
@@ -45,29 +36,40 @@ jobs:
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         toolchain: stable
-        target: ${{ matrix.platform.target }}
 
-    - name: Build release binary
-      run: cargo build --release --target ${{ matrix.platform.target }} --locked
-
-    - name: Get package name
+    - name: Get package info
       id: package_info
+      shell: bash
       run: |
         NAME=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name')
         echo "name=$NAME" >> $GITHUB_OUTPUT
 
-    - name: Upload binary artifact
+    - name: Build release binary
+      run: cargo build --release --locked
+
+    - name: Determine binary path
+      id: binary_path
+      shell: bash
+      run: |
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          echo "binary_path=target/release/${{ steps.package_info.outputs.name }}.exe" >> $GITHUB_OUTPUT
+          echo "asset_name=${{ steps.package_info.outputs.name }}-${{ github.event.inputs.version }}-${{ matrix.asset_name }}.exe" >> $GITHUB_OUTPUT
+        else
+          echo "binary_path=target/release/${{ steps.package_info.outputs.name }}" >> $GITHUB_OUTPUT
+          echo "asset_name=${{ steps.package_info.outputs.name }}-${{ github.event.inputs.version }}-${{ matrix.asset_name }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.package_info.outputs.name }}-${{ matrix.platform.asset_suffix }}
-        path: target/${{ matrix.platform.target }}/release/${{ steps.package_info.outputs.name }}${{ matrix.platform.extension || '' }}
+        name: ${{ steps.package_info.outputs.name }}-${{ matrix.asset_name }}
+        path: ${{ steps.binary_path.outputs.binary_path }}
         retention-days: 1
 
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: build-matrix
-    if: always() && !contains(needs.*.result, 'failure')
+    needs: build
     
     steps:
     - name: Checkout code
@@ -77,9 +79,7 @@ jobs:
       id: package_info
       run: |
         NAME=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name')
-        VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
         echo "name=$NAME" >> $GITHUB_OUTPUT
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
 
     - name: Download all artifacts
       uses: actions/download-artifact@v4
@@ -93,3 +93,5 @@ jobs:
         release_name: ${{ steps.package_info.outputs.name }}-${{ github.event.inputs.version }}
         body: ${{ github.event.inputs.release_notes }}
         files: artifacts/**/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
