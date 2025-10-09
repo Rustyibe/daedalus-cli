@@ -678,7 +678,7 @@ mod tests {
 
     #[test]
     fn test_initial_state() {
-        let temp_dir = tempdir::TempDir::new("tui_test").unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
         unsafe {
             std::env::set_var("HOME", temp_dir.path().to_str().unwrap());
         }
@@ -692,7 +692,7 @@ mod tests {
 
     #[test]
     fn test_new_with_connection() {
-        let temp_dir = tempdir::TempDir::new("tui_test").unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
         unsafe {
             std::env::set_var("HOME", temp_dir.path().to_str().unwrap());
         }
@@ -709,7 +709,7 @@ mod tests {
 
     #[test]
     fn test_navigation_between_connections() {
-        let temp_dir = tempdir::TempDir::new("tui_test").unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
         unsafe {
             std::env::set_var("HOME", temp_dir.path().to_str().unwrap());
         }
@@ -839,7 +839,7 @@ mod tests {
 
     #[test]
     fn test_app_state_transitions() {
-        let temp_dir = tempdir::TempDir::new("tui_test").unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
         unsafe {
             std::env::set_var("HOME", temp_dir.path().to_str().unwrap());
         }

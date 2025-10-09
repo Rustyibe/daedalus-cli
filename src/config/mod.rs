@@ -197,10 +197,10 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempdir::TempDir;
+    use tempfile::TempDir;
 
     fn setup_test_env() -> TempDir {
-        let temp_dir = TempDir::new("daedalus_config_test").unwrap();
+        let temp_dir = TempDir::new().unwrap();
         unsafe {
             std::env::set_var("HOME", temp_dir.path().to_str().unwrap());
         }

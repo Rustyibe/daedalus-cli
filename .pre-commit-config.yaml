@@ -51,6 +51,15 @@ repos:
         args: ["--locked"]
         stages: [pre-push] # 只在 push 时运行
 
+      - id: audit
+        name: "cargo audit"
+        description: "Audit dependencies with cargo audit"
+        entry: cargo audit
+        language: system
+        pass_filenames: false
+        args: ["--deny", "warnings"]
+        stages: [pre-push] # 只在 push 时运行
+
       - id: check
         name: "cargo check"
         description: "Check project with cargo check"
