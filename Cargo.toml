@@ -14,7 +14,7 @@ exclude = ["/.git", "/target"]
 
 [dependencies]
 tokio = { version = "1.47.1", features = ["full"] }
-tokio-postgres = "0.7.14"
+tokio-postgres = "0.7.15"
 ratatui = "0.29.0"
 crossterm = "0.29.0"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -27,6 +27,7 @@ clap_complete = "4.5.58"
 anyhow = "1.0.100"
 aes-gcm = "0.10.3"
 aead = "0.5.2"
+dirs = "6.0.0"
 
 [dev-dependencies]
 tempdir = "0.3.7"

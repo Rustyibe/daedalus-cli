@@ -3,6 +3,7 @@ use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use dirs::home_dir;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -129,7 +130,7 @@ impl Config {
     }
 
     fn get_config_file_path() -> std::path::PathBuf {
-        let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let home_dir = Self::get_home_dir();
         let mut config_dir = std::path::PathBuf::from(home_dir);
         config_dir.push(".daedalus-cli");
         config_dir.push("config.json");
@@ -137,11 +138,18 @@ impl Config {
     }
 
     fn get_key_file_path() -> std::path::PathBuf {
-        let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let home_dir = Self::get_home_dir();
         let mut p = std::path::PathBuf::from(home_dir);
         p.push(".daedalus-cli");
         p.push("key.bin");
         p
+    }
+
+    fn get_home_dir() -> String {
+        // Use the dirs crate for reliable cross-platform home directory detection
+        home_dir()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_else(|| ".".to_string()) // Fallback to current directory
     }
 
     fn get_or_create_key() -> Result<[u8; 32]> {
