@@ -11,11 +11,12 @@ use ratatui::{
 };
 use std::io;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum AppState {
     ConnectionSelection,
     TableList,
     TableData,
+    FieldDetail, // New state for detailed field view
     CustomQuery,
     CustomQueryInput,
     Connecting,
@@ -29,6 +30,7 @@ pub struct App {
     pub connections_list_state: ListState,
     pub tables_list_state: ListState,
     pub table_data_state: TableState,
+    pub field_selection_state: Option<usize>, // Track selected field in the current row (None means row-focused mode)
     pub tables: Vec<String>,
     pub current_table: Option<String>,
     pub table_columns: Vec<String>,
@@ -45,6 +47,10 @@ pub struct App {
     pub custom_query_result_data: Vec<Vec<String>>,
     pub custom_query_current_page: u32,
     pub custom_query_max_page: u32,
+    // Field detail view
+    pub selected_field_value: Option<String>, // Store the value for detailed view
+    pub field_detail_scroll: u16,             // Track scroll position for long field values
+    pub field_detail_origin_state: Option<AppState>, // Track the original state when entering field detail view
 }
 
 impl App {
@@ -59,6 +65,7 @@ impl App {
             connections_list_state: ListState::default(),
             tables_list_state: ListState::default(),
             table_data_state: TableState::default(),
+            field_selection_state: None,
             tables: Vec::new(),
             current_table: None,
             table_columns: Vec::new(),
@@ -75,6 +82,9 @@ impl App {
             custom_query_result_data: Vec::new(),
             custom_query_current_page: 0,
             custom_query_max_page: 0,
+            selected_field_value: None,
+            field_detail_scroll: 0,
+            field_detail_origin_state: None,
         })
     }
 
@@ -88,6 +98,7 @@ impl App {
             connections_list_state: ListState::default(),
             tables_list_state: ListState::default(),
             table_data_state: TableState::default(),
+            field_selection_state: None,
             tables: Vec::new(),
             current_table: None,
             table_columns: Vec::new(),
@@ -104,6 +115,9 @@ impl App {
             custom_query_result_data: Vec::new(),
             custom_query_current_page: 0,
             custom_query_max_page: 0,
+            selected_field_value: None,
+            field_detail_scroll: 0,
+            field_detail_origin_state: None,
         };
 
         // Pre-select the connection by name if it exists
@@ -337,6 +351,161 @@ impl App {
         }
     }
 
+    pub fn next_field(&mut self) {
+        // Check if we're in table data view
+        if matches!(self.state, AppState::TableData)
+            && let Some(selected_row_idx) = self.table_data_state.selected()
+            && selected_row_idx < self.table_data.len()
+        {
+            let num_fields = self.table_data[selected_row_idx].len();
+            if num_fields > 0 {
+                let next_field_idx = match self.field_selection_state {
+                    Some(current_idx) => {
+                        if current_idx >= num_fields - 1 {
+                            0 // Wrap to first field
+                        } else {
+                            current_idx + 1
+                        }
+                    }
+                    None => 0, // Start with first field if none selected yet
+                };
+                self.field_selection_state = Some(next_field_idx);
+            }
+        }
+        // Check if we're in custom query view
+        else if matches!(self.state, AppState::CustomQuery)
+            && let Some(selected_row_idx) = self.table_data_state.selected()
+            && selected_row_idx < self.custom_query_result_data.len()
+        {
+            let num_fields = self.custom_query_result_data[selected_row_idx].len();
+            if num_fields > 0 {
+                let next_field_idx = match self.field_selection_state {
+                    Some(current_idx) => {
+                        if current_idx >= num_fields - 1 {
+                            0 // Wrap to first field
+                        } else {
+                            current_idx + 1
+                        }
+                    }
+                    None => 0, // Start with first field if none selected yet
+                };
+                self.field_selection_state = Some(next_field_idx);
+            }
+        }
+    }
+
+    pub fn previous_field(&mut self) {
+        // Check if we're in table data view
+        if matches!(self.state, AppState::TableData)
+            && let Some(selected_row_idx) = self.table_data_state.selected()
+            && selected_row_idx < self.table_data.len()
+        {
+            let num_fields = self.table_data[selected_row_idx].len();
+            if num_fields > 0 {
+                let prev_field_idx = match self.field_selection_state {
+                    Some(current_idx) => {
+                        if current_idx == 0 {
+                            num_fields - 1 // Wrap to last field
+                        } else {
+                            current_idx - 1
+                        }
+                    }
+                    None => 0, // Start with first field if none selected yet
+                };
+                self.field_selection_state = Some(prev_field_idx);
+            }
+        }
+        // Check if we're in custom query view
+        else if matches!(self.state, AppState::CustomQuery)
+            && let Some(selected_row_idx) = self.table_data_state.selected()
+            && selected_row_idx < self.custom_query_result_data.len()
+        {
+            let num_fields = self.custom_query_result_data[selected_row_idx].len();
+            if num_fields > 0 {
+                let prev_field_idx = match self.field_selection_state {
+                    Some(current_idx) => {
+                        if current_idx == 0 {
+                            num_fields - 1 // Wrap to last field
+                        } else {
+                            current_idx - 1
+                        }
+                    }
+                    None => 0, // Start with first field if none selected yet
+                };
+                self.field_selection_state = Some(prev_field_idx);
+            }
+        }
+    }
+
+    pub fn enter_field_detail_view(&mut self) {
+        // Check if we're in table data view
+        if matches!(self.state, AppState::TableData)
+            && let Some(selected_row_idx) = self.table_data_state.selected()
+            && selected_row_idx < self.table_data.len()
+        {
+            if let Some(selected_field_idx) = self.field_selection_state {
+                if selected_field_idx < self.table_data[selected_row_idx].len() {
+                    // Store the selected field value for detailed view
+                    self.selected_field_value =
+                        Some(self.table_data[selected_row_idx][selected_field_idx].clone());
+                    // Store the original state for returning later
+                    self.field_detail_origin_state = Some(AppState::TableData);
+                    // Switch to field detail view
+                    self.state = AppState::FieldDetail;
+                    self.field_detail_scroll = 0; // Reset scroll to top
+                }
+            } else if !self.table_data[selected_row_idx].is_empty() {
+                // If no field is selected yet, select the first field
+                self.field_selection_state = Some(0);
+                self.selected_field_value = Some(self.table_data[selected_row_idx][0].clone());
+                // Store the original state for returning later
+                self.field_detail_origin_state = Some(AppState::TableData);
+                self.state = AppState::FieldDetail;
+                self.field_detail_scroll = 0; // Reset scroll to top
+            }
+        }
+        // Check if we're in custom query view
+        else if matches!(self.state, AppState::CustomQuery)
+            && let Some(selected_row_idx) = self.table_data_state.selected()
+            && selected_row_idx < self.custom_query_result_data.len()
+        {
+            if let Some(selected_field_idx) = self.field_selection_state {
+                if selected_field_idx < self.custom_query_result_data[selected_row_idx].len() {
+                    // Store the selected field value for detailed view
+                    self.selected_field_value = Some(
+                        self.custom_query_result_data[selected_row_idx][selected_field_idx].clone(),
+                    );
+                    // Store the original state for returning later
+                    self.field_detail_origin_state = Some(AppState::CustomQuery);
+                    // Switch to field detail view
+                    self.state = AppState::FieldDetail;
+                    self.field_detail_scroll = 0; // Reset scroll to top
+                }
+            } else if !self.custom_query_result_data[selected_row_idx].is_empty() {
+                // If no field is selected yet, select the first field
+                self.field_selection_state = Some(0);
+                self.selected_field_value =
+                    Some(self.custom_query_result_data[selected_row_idx][0].clone());
+                // Store the original state for returning later
+                self.field_detail_origin_state = Some(AppState::CustomQuery);
+                self.state = AppState::FieldDetail;
+                self.field_detail_scroll = 0; // Reset scroll to top
+            }
+        }
+    }
+
+    pub fn scroll_field_detail_up(&mut self) {
+        if self.field_detail_scroll > 0 {
+            self.field_detail_scroll -= 1;
+        }
+    }
+
+    pub fn scroll_field_detail_down(&mut self) {
+        // We'll update the scroll based on content when rendering, so just increment here
+        // We can't determine the total lines without knowing the terminal height here
+        self.field_detail_scroll += 1;
+    }
+
     pub async fn execute_custom_query(&mut self) -> Result<()> {
         if let Some(conn) = &self.connection {
             let offset = (self.custom_query_current_page * self.items_per_page) as i64;
@@ -467,11 +636,22 @@ pub async fn run_app<B: Backend>(
                     KeyCode::Esc => {
                         app.state = AppState::TableList;
                         app.current_table = None;
+                        app.field_selection_state = None; // Reset field selection
                     }
-                    KeyCode::Down => app.next_row(),
-                    KeyCode::Up => app.previous_row(),
+                    KeyCode::Down => {
+                        app.next_row();
+                        app.field_selection_state = None; // Reset field selection when changing rows
+                    }
+                    KeyCode::Up => {
+                        app.previous_row();
+                        app.field_selection_state = None; // Reset field selection when changing rows
+                    }
+                    KeyCode::Left => app.previous_field(), // Add left arrow for field navigation
+                    KeyCode::Right => app.next_field(),    // Add right arrow for field navigation
+                    KeyCode::Enter => app.enter_field_detail_view(), // Add enter to view field detail
                     KeyCode::PageDown => {
                         app.next_page();
+                        app.field_selection_state = None; // Reset field selection when changing pages
                         // Reload data for the new page
                         if let Err(e) = app.load_table_data().await {
                             app.error_message = Some(format!("Error loading table data: {}", e));
@@ -480,6 +660,7 @@ pub async fn run_app<B: Backend>(
                     }
                     KeyCode::PageUp => {
                         app.previous_page();
+                        app.field_selection_state = None; // Reset field selection when changing pages
                         // Reload data for the new page
                         if let Err(e) = app.load_table_data().await {
                             app.error_message = Some(format!("Error loading table data: {}", e));
@@ -489,15 +670,18 @@ pub async fn run_app<B: Backend>(
                     KeyCode::Char('t') => {
                         app.state = AppState::TableList;
                         app.current_table = None;
+                        app.field_selection_state = None; // Reset field selection
                     }
                     KeyCode::Char('c') => {
                         app.state = AppState::ConnectionSelection;
                         app.current_table = None;
+                        app.field_selection_state = None; // Reset field selection
                     }
                     KeyCode::Char('s') => {
                         // Enter custom query mode
                         app.state = AppState::CustomQueryInput;
                         app.custom_query_input.clear();
+                        app.field_selection_state = None; // Reset field selection
                     }
                     _ => {}
                 },
@@ -555,13 +739,39 @@ pub async fn run_app<B: Backend>(
                     }
                     _ => {}
                 },
+                AppState::FieldDetail => match key.code {
+                    KeyCode::Char('q') => return Ok(()),
+                    KeyCode::Esc => {
+                        // Return to the original state
+                        app.state = app
+                            .field_detail_origin_state
+                            .clone()
+                            .unwrap_or(AppState::TableData);
+                    }
+                    KeyCode::Up => app.scroll_field_detail_up(),
+                    KeyCode::Down => app.scroll_field_detail_down(),
+                    _ => {}
+                },
                 AppState::CustomQuery => match key.code {
                     KeyCode::Char('q') => return Ok(()),
-                    KeyCode::Esc => app.state = AppState::CustomQueryInput,
-                    KeyCode::Down => app.next_row(),
-                    KeyCode::Up => app.previous_row(),
+                    KeyCode::Esc => {
+                        app.state = AppState::CustomQueryInput;
+                        app.field_selection_state = None; // Reset field selection
+                    }
+                    KeyCode::Down => {
+                        app.next_row();
+                        app.field_selection_state = None; // Reset field selection when changing rows
+                    }
+                    KeyCode::Up => {
+                        app.previous_row();
+                        app.field_selection_state = None; // Reset field selection when changing rows
+                    }
+                    KeyCode::Left => app.previous_field(), // Add left arrow for field navigation
+                    KeyCode::Right => app.next_field(),    // Add right arrow for field navigation
+                    KeyCode::Enter => app.enter_field_detail_view(), // Add enter to view field detail
                     KeyCode::PageDown => {
                         app.next_custom_query_page();
+                        app.field_selection_state = None; // Reset field selection when changing pages
                         // Reload data for the new page
                         if let Err(e) = app.execute_custom_query().await {
                             app.error_message = Some(format!("Error loading query data: {}", e));
@@ -570,6 +780,7 @@ pub async fn run_app<B: Backend>(
                     }
                     KeyCode::PageUp => {
                         app.previous_custom_query_page();
+                        app.field_selection_state = None; // Reset field selection when changing pages
                         // Reload data for the new page
                         if let Err(e) = app.execute_custom_query().await {
                             app.error_message = Some(format!("Error loading query data: {}", e));
@@ -578,13 +789,16 @@ pub async fn run_app<B: Backend>(
                     }
                     KeyCode::Char('t') => {
                         app.state = AppState::TableList;
+                        app.field_selection_state = None; // Reset field selection
                     }
                     KeyCode::Char('c') => {
                         app.state = AppState::ConnectionSelection;
+                        app.field_selection_state = None; // Reset field selection
                     }
                     KeyCode::Char('s') => {
                         // Go back to query input
                         app.state = AppState::CustomQueryInput;
+                        app.field_selection_state = None; // Reset field selection
                     }
                     _ => {}
                 },
@@ -642,6 +856,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         AppState::ConnectionError => render_connection_error(f, app, main_area),
         AppState::TableList => render_table_list(f, app, main_area),
         AppState::TableData => render_table_data(f, app, main_area),
+        AppState::FieldDetail => render_field_detail(f, app, main_area),
         AppState::CustomQueryInput => render_custom_query_input(f, app, main_area),
         AppState::CustomQuery => render_custom_query_results(f, app, main_area),
     }
@@ -798,12 +1013,26 @@ fn render_table_data(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) 
         .iter()
         .enumerate()
         .map(|(i, row)| {
-            let cells: Vec<Span> = row.iter().map(|cell| Span::raw(cell.as_str())).collect();
-            let mut row = Row::new(cells).height(1);
-            if Some(i) == app.table_data_state.selected() {
-                row = row.style(Style::default().bg(Color::LightBlue));
-            }
-            row
+            let cells: Vec<Span> = row
+                .iter()
+                .enumerate()
+                .map(|(j, cell)| {
+                    // Check if this cell is selected
+                    let mut cell_style = Style::default();
+                    if Some(i) == app.table_data_state.selected()
+                        && app.field_selection_state.is_some()
+                        && app.field_selection_state.unwrap() == j
+                    {
+                        // This is the currently selected field in the selected row
+                        cell_style = Style::default().bg(Color::Yellow).fg(Color::Black);
+                    } else if Some(i) == app.table_data_state.selected() {
+                        // This is in the currently selected row
+                        cell_style = Style::default().bg(Color::LightBlue);
+                    }
+                    Span::styled(cell.as_str(), cell_style)
+                })
+                .collect();
+            Row::new(cells).height(1)
         })
         .collect();
 
@@ -830,7 +1059,7 @@ fn render_table_data(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) 
 
     f.render_stateful_widget(table, area, &mut app.table_data_state);
 
-    let help_text = Paragraph::new(Span::raw("Use ↑↓ to navigate rows, PageUp/PageDown to change pages, 't' for tables, ESC for back, 'c' for connections, 'q' to quit"))
+    let help_text = Paragraph::new(Span::raw("Use ↑↓ to navigate rows, ←→ to navigate fields in row, Enter to view field detail, PageUp/PageDown to change pages, 't' for tables, ESC for back, 'c' for connections, 'q' to quit"))
         .block(Block::default().borders(Borders::NONE))
         .style(Style::default().add_modifier(Modifier::ITALIC));
 
@@ -842,6 +1071,35 @@ fn render_table_data(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) 
         height: 2,
     };
     f.render_widget(help_text, help_area);
+}
+
+fn render_field_detail(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(90), Constraint::Percentage(10)].as_ref())
+        .split(area);
+
+    let value_to_display = app
+        .selected_field_value
+        .as_deref()
+        .unwrap_or("No value selected");
+
+    // Create a paragraph with the field value, potentially long text
+    let field_para = Paragraph::new(Text::from(value_to_display))
+        .block(Block::default().borders(Borders::ALL).title("Field Detail"))
+        .style(Style::default().fg(Color::White))
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .scroll((app.field_detail_scroll, 0)); // Add vertical scrolling
+
+    f.render_widget(field_para, chunks[0]);
+
+    let help_text = Paragraph::new(Span::raw(
+        "Use ↑↓ to scroll, ESC to return to table view, 'q' to quit",
+    ))
+    .block(Block::default().borders(Borders::NONE))
+    .style(Style::default().add_modifier(Modifier::ITALIC));
+
+    f.render_widget(help_text, chunks[1]);
 }
 
 fn render_custom_query_input(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
@@ -908,12 +1166,26 @@ fn render_custom_query_results(f: &mut Frame, app: &mut App, area: ratatui::layo
         .iter()
         .enumerate()
         .map(|(i, row)| {
-            let cells: Vec<Span> = row.iter().map(|cell| Span::raw(cell.as_str())).collect();
-            let mut row = Row::new(cells).height(1);
-            if Some(i) == app.table_data_state.selected() {
-                row = row.style(Style::default().bg(Color::LightBlue));
-            }
-            row
+            let cells: Vec<Span> = row
+                .iter()
+                .enumerate()
+                .map(|(j, cell)| {
+                    // Check if this cell is selected
+                    let mut cell_style = Style::default();
+                    if Some(i) == app.table_data_state.selected()
+                        && app.field_selection_state.is_some()
+                        && app.field_selection_state.unwrap() == j
+                    {
+                        // This is the currently selected field in the selected row
+                        cell_style = Style::default().bg(Color::Yellow).fg(Color::Black);
+                    } else if Some(i) == app.table_data_state.selected() {
+                        // This is in the currently selected row
+                        cell_style = Style::default().bg(Color::LightBlue);
+                    }
+                    Span::styled(cell.as_str(), cell_style)
+                })
+                .collect();
+            Row::new(cells).height(1)
         })
         .collect();
 
@@ -939,7 +1211,7 @@ fn render_custom_query_results(f: &mut Frame, app: &mut App, area: ratatui::layo
     f.render_stateful_widget(table, area, &mut app.table_data_state);
 
     let help_text = Paragraph::new(Span::raw(
-        "Use ↑↓ to navigate rows, PageUp/PageDown to change pages, 's' for query input, 't' for tables, 'c' for connections, ESC for back, 'q' to quit",
+        "Use ↑↓ to navigate rows, ←→ to navigate fields in row, Enter to view field detail, PageUp/PageDown to change pages, 's' for query input, 't' for tables, 'c' for connections, ESC for back, 'q' to quit",
     ))
     .block(Block::default().borders(Borders::NONE))
     .style(Style::default().add_modifier(Modifier::ITALIC));

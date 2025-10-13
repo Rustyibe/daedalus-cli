@@ -24,6 +24,8 @@ Daedalus CLI is now fully cross-platform compatible, supporting Windows, macOS, 
 - **Terminal User Interface**: Intuitive TUI for browsing database tables, using arrow keys to navigate between items in the current view
 - **Data Exploration**: Browse database tables with column headers, view table data with row highlighting
 - **Pagination Support**: Navigate large datasets using PageUp/PageDown keys
+- **Field-Level Navigation**: Navigate between individual fields within a selected record using left/right arrow keys
+- **Detailed Field View**: View complete field values by pressing Enter on a selected field, with support for scrolling through long text using up/down arrow keys
 - **Custom SQL Queries**: Execute custom SQL queries directly from the TUI with result pagination
 - **Secure Storage**: AES-256-GCM encryption for storing sensitive connection password information
 - **Cross-Platform Compatibility**: Full support for Windows, macOS, and Linux systems with consistent behavior
@@ -146,13 +148,22 @@ daedalus-cli completions fish > ~/.config/fish/completions/daedalus-cli.fish
 
 After connecting to a database, the TUI provides the following navigation controls:
 
-- **Arrow keys (↑/↓)**: Navigate between items in the current view
-- **Enter**: Select highlighted item
+- **Arrow keys (↑/↓)**: Navigate between records in the current view
+- **Left/Right arrow keys (←/→)**: When a record is selected, navigate between individual fields within that record
+- **Enter**: Select highlighted record or view detailed field value when a field is selected
 - **PageUp/PageDown**: Navigate in large datasets
 - **'s'**: Enter custom SQL query mode or return to query input
 - **'t'**: Return to table list
 - **'c'**: Return to connection selection
 - **'q' or Esc**: Exit the application
+
+### Field Detail View Navigation
+
+When viewing detailed field values:
+
+- **Up/Down arrow keys (↑/↓)**: Scroll through long text content in the field detail view
+- **Esc**: Return to the table view
+- **'q'**: Exit the application
 
 ## Custom SQL Queries
 
