@@ -16,6 +16,7 @@ Daedalus CLI is a Rust-based command-line interface tool for PostgreSQL database
 - **Terminal User Interface**: Intuitive TUI for browsing database tables, using arrow keys to navigate between items in the current view
 - **Data Exploration**: Browse database tables with column headers, view table data with row highlighting
 - **Pagination Support**: Navigate large datasets using PageUp/PageDown keys
+- **Custom SQL Queries**: Execute custom SQL queries directly from the TUI with result pagination
 - **Secure Storage**: AES-256-GCM encryption for storing sensitive connection password information
 
 ## Installation
@@ -139,9 +140,21 @@ After connecting to a database, the TUI provides the following navigation contro
 - **Arrow keys (↑/↓)**: Navigate between items in the current view
 - **Enter**: Select highlighted item
 - **PageUp/PageDown**: Navigate in large datasets
+- **'s'**: Enter custom SQL query mode or return to query input
 - **'t'**: Return to table list
 - **'c'**: Return to connection selection
 - **'q' or Esc**: Exit the application
+
+## Custom SQL Queries
+
+Daedalus CLI now supports executing custom SQL queries directly from the TUI:
+
+- **Enter Query Mode**: Press 's' from the table list view to enter custom query input mode
+- **Execute Query**: Type your SQL query and press Enter to execute it
+- **View Results**: Query results are displayed in a paginated table format
+- **Navigate Results**: Use arrow keys to navigate through rows, PageUp/PageDown to change pages
+- **Query Input**: The query input area supports text editing with cursor movement (left/right, home/end)
+- **Return to Query Input**: Press 's' while viewing results to go back to the query input screen
 
 ## Security
 

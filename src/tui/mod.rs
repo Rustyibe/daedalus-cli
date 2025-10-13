@@ -16,6 +16,8 @@ pub enum AppState {
     ConnectionSelection,
     TableList,
     TableData,
+    CustomQuery,
+    CustomQueryInput,
     Connecting,
     ConnectionError,
 }
@@ -36,6 +38,13 @@ pub struct App {
     pub items_per_page: u32,
     pub error_message: Option<String>,
     pub connection_status: Option<String>,
+    // Custom query fields
+    pub custom_query_input: String,
+    pub custom_query_cursor_position: usize,
+    pub custom_query_result_columns: Vec<String>,
+    pub custom_query_result_data: Vec<Vec<String>>,
+    pub custom_query_current_page: u32,
+    pub custom_query_max_page: u32,
 }
 
 impl App {
@@ -59,6 +68,13 @@ impl App {
             items_per_page: 20,
             error_message: None,
             connection_status: None,
+            // Custom query fields
+            custom_query_input: String::new(),
+            custom_query_cursor_position: 0,
+            custom_query_result_columns: Vec::new(),
+            custom_query_result_data: Vec::new(),
+            custom_query_current_page: 0,
+            custom_query_max_page: 0,
         })
     }
 
@@ -81,6 +97,13 @@ impl App {
             items_per_page: 20,
             error_message: None,
             connection_status: Some(format!("Connecting to {}...", connection_name)),
+            // Custom query fields
+            custom_query_input: String::new(),
+            custom_query_cursor_position: 0,
+            custom_query_result_columns: Vec::new(),
+            custom_query_result_data: Vec::new(),
+            custom_query_current_page: 0,
+            custom_query_max_page: 0,
         };
 
         // Pre-select the connection by name if it exists
@@ -253,13 +276,19 @@ impl App {
     }
 
     pub fn next_row(&mut self) {
-        if self.table_data.is_empty() {
+        let data_len = if matches!(self.state, AppState::CustomQuery) {
+            self.custom_query_result_data.len()
+        } else {
+            self.table_data.len()
+        };
+
+        if data_len == 0 {
             return;
         }
 
         let i = match self.table_data_state.selected() {
             Some(i) => {
-                if i >= self.table_data.len() - 1 {
+                if i >= data_len - 1 {
                     0
                 } else {
                     i + 1
@@ -271,14 +300,20 @@ impl App {
     }
 
     pub fn previous_row(&mut self) {
-        if self.table_data.is_empty() {
+        let data_len = if matches!(self.state, AppState::CustomQuery) {
+            self.custom_query_result_data.len()
+        } else {
+            self.table_data.len()
+        };
+
+        if data_len == 0 {
             return;
         }
 
         let i = match self.table_data_state.selected() {
             Some(i) => {
                 if i == 0 {
-                    self.table_data.len() - 1
+                    data_len - 1
                 } else {
                     i - 1
                 }
@@ -299,6 +334,44 @@ impl App {
         if self.current_page > 0 {
             self.current_page -= 1;
             self.table_data.clear(); // Clear to reload on next render
+        }
+    }
+
+    pub async fn execute_custom_query(&mut self) -> Result<()> {
+        if let Some(conn) = &self.connection {
+            let offset = (self.custom_query_current_page * self.items_per_page) as i64;
+            let limit = self.items_per_page as i64;
+
+            let (columns, data) = conn
+                .execute_custom_query(&self.custom_query_input, offset, limit)
+                .await?;
+
+            self.custom_query_result_columns = columns;
+            self.custom_query_result_data = data;
+
+            // Calculate max page based on query count
+            let total_count = conn.get_query_row_count(&self.custom_query_input).await?;
+            self.custom_query_max_page =
+                ((total_count as f64) / (self.items_per_page as f64)).ceil() as u32;
+
+            if !self.custom_query_result_data.is_empty() {
+                self.table_data_state.select(Some(0));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn next_custom_query_page(&mut self) {
+        if self.custom_query_current_page < self.custom_query_max_page - 1 {
+            self.custom_query_current_page += 1;
+            self.custom_query_result_data.clear(); // Clear to reload on next render
+        }
+    }
+
+    pub fn previous_custom_query_page(&mut self) {
+        if self.custom_query_current_page > 0 {
+            self.custom_query_current_page -= 1;
+            self.custom_query_result_data.clear(); // Clear to reload on next render
         }
     }
 }
@@ -382,6 +455,11 @@ pub async fn run_app<B: Backend>(
                         }
                     }
                     KeyCode::Char('c') => app.state = AppState::ConnectionSelection,
+                    KeyCode::Char('s') => {
+                        // Enter custom query mode
+                        app.state = AppState::CustomQueryInput;
+                        app.custom_query_input.clear();
+                    }
                     _ => {}
                 },
                 AppState::TableData => match key.code {
@@ -415,6 +493,98 @@ pub async fn run_app<B: Backend>(
                     KeyCode::Char('c') => {
                         app.state = AppState::ConnectionSelection;
                         app.current_table = None;
+                    }
+                    KeyCode::Char('s') => {
+                        // Enter custom query mode
+                        app.state = AppState::CustomQueryInput;
+                        app.custom_query_input.clear();
+                    }
+                    _ => {}
+                },
+                AppState::CustomQueryInput => match key.code {
+                    KeyCode::Esc => app.state = AppState::TableList,
+                    KeyCode::Enter => {
+                        // Execute the custom query
+                        if !app.custom_query_input.trim().is_empty() {
+                            // Reset pagination
+                            app.custom_query_current_page = 0;
+                            app.state = AppState::CustomQuery;
+
+                            // Execute the query
+                            if let Err(e) = app.execute_custom_query().await {
+                                app.error_message = Some(format!("Error executing query: {}", e));
+                                app.state = AppState::ConnectionError;
+                            }
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        if app.custom_query_cursor_position > 0 {
+                            // Find the previous character boundary
+                            let mut chars: Vec<char> = app.custom_query_input.chars().collect();
+                            if app.custom_query_cursor_position <= chars.len() {
+                                chars.remove(app.custom_query_cursor_position - 1);
+                                app.custom_query_input = chars.into_iter().collect();
+                                app.custom_query_cursor_position -= 1;
+                            }
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        // Convert to chars, insert at position, then convert back
+                        let mut chars: Vec<char> = app.custom_query_input.chars().collect();
+                        if app.custom_query_cursor_position <= chars.len() {
+                            chars.insert(app.custom_query_cursor_position, c);
+                            app.custom_query_input = chars.into_iter().collect();
+                            app.custom_query_cursor_position += 1;
+                        }
+                    }
+                    KeyCode::Left => {
+                        if app.custom_query_cursor_position > 0 {
+                            app.custom_query_cursor_position -= 1;
+                        }
+                    }
+                    KeyCode::Right => {
+                        if app.custom_query_cursor_position < app.custom_query_input.len() {
+                            app.custom_query_cursor_position += 1;
+                        }
+                    }
+                    KeyCode::Home => {
+                        app.custom_query_cursor_position = 0;
+                    }
+                    KeyCode::End => {
+                        app.custom_query_cursor_position = app.custom_query_input.len();
+                    }
+                    _ => {}
+                },
+                AppState::CustomQuery => match key.code {
+                    KeyCode::Char('q') => return Ok(()),
+                    KeyCode::Esc => app.state = AppState::CustomQueryInput,
+                    KeyCode::Down => app.next_row(),
+                    KeyCode::Up => app.previous_row(),
+                    KeyCode::PageDown => {
+                        app.next_custom_query_page();
+                        // Reload data for the new page
+                        if let Err(e) = app.execute_custom_query().await {
+                            app.error_message = Some(format!("Error loading query data: {}", e));
+                            app.state = AppState::ConnectionError;
+                        }
+                    }
+                    KeyCode::PageUp => {
+                        app.previous_custom_query_page();
+                        // Reload data for the new page
+                        if let Err(e) = app.execute_custom_query().await {
+                            app.error_message = Some(format!("Error loading query data: {}", e));
+                            app.state = AppState::ConnectionError;
+                        }
+                    }
+                    KeyCode::Char('t') => {
+                        app.state = AppState::TableList;
+                    }
+                    KeyCode::Char('c') => {
+                        app.state = AppState::ConnectionSelection;
+                    }
+                    KeyCode::Char('s') => {
+                        // Go back to query input
+                        app.state = AppState::CustomQueryInput;
                     }
                     _ => {}
                 },
@@ -472,6 +642,8 @@ fn ui(f: &mut Frame, app: &mut App) {
         AppState::ConnectionError => render_connection_error(f, app, main_area),
         AppState::TableList => render_table_list(f, app, main_area),
         AppState::TableData => render_table_data(f, app, main_area),
+        AppState::CustomQueryInput => render_custom_query_input(f, app, main_area),
+        AppState::CustomQuery => render_custom_query_results(f, app, main_area),
     }
 }
 
@@ -572,7 +744,7 @@ fn render_table_list(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) 
     f.render_stateful_widget(list, area, &mut app.tables_list_state);
 
     let help_text = Paragraph::new(Span::raw(
-        "Use ↑↓ to navigate, Enter to select, 'c' for connections, ESC for back, 'q' to quit",
+        "Use ↑↓ to navigate, Enter to select, 's' for SQL query, 'c' for connections, ESC for back, 'q' to quit",
     ))
     .block(Block::default().borders(Borders::NONE))
     .style(Style::default().add_modifier(Modifier::ITALIC));
@@ -661,6 +833,116 @@ fn render_table_data(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) 
     let help_text = Paragraph::new(Span::raw("Use ↑↓ to navigate rows, PageUp/PageDown to change pages, 't' for tables, ESC for back, 'c' for connections, 'q' to quit"))
         .block(Block::default().borders(Borders::NONE))
         .style(Style::default().add_modifier(Modifier::ITALIC));
+
+    // Position help text at the bottom
+    let help_area = ratatui::layout::Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(2),
+        width: area.width,
+        height: 2,
+    };
+    f.render_widget(help_text, help_area);
+}
+
+fn render_custom_query_input(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+        .split(area);
+
+    // Input area
+    let input_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Enter SQL Query");
+
+    // Create input text with cursor at the correct position
+    let input_text = {
+        let mut chars: Vec<char> = app.custom_query_input.chars().collect();
+        if std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            % 1000
+            < 500
+        {
+            // Insert blinking cursor at the current cursor position
+            if app.custom_query_cursor_position <= chars.len() {
+                chars.insert(app.custom_query_cursor_position, '|');
+            }
+        }
+        chars.into_iter().collect::<String>()
+    };
+
+    let input_paragraph = Paragraph::new(input_text)
+        .block(input_block)
+        .style(Style::default().fg(Color::Yellow));
+
+    f.render_widget(input_paragraph, chunks[0]);
+
+    // Help text
+    let help_text = Paragraph::new(Span::raw(
+        "Type your SQL query and press Enter to execute. Press ESC to go back to table list.",
+    ))
+    .block(Block::default().borders(Borders::NONE))
+    .style(Style::default().add_modifier(Modifier::ITALIC));
+
+    f.render_widget(help_text, chunks[1]);
+}
+
+fn render_custom_query_results(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    // Create headers for the table
+    let header_names: Vec<Span> = app
+        .custom_query_result_columns
+        .iter()
+        .map(|c| Span::raw(c.as_str()))
+        .collect();
+
+    // Create header rows
+    let header_row_names = Row::new(header_names)
+        .height(1)
+        .style(Style::default().add_modifier(Modifier::BOLD));
+
+    // Create rows for the table
+    let rows: Vec<Row> = app
+        .custom_query_result_data
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let cells: Vec<Span> = row.iter().map(|cell| Span::raw(cell.as_str())).collect();
+            let mut row = Row::new(cells).height(1);
+            if Some(i) == app.table_data_state.selected() {
+                row = row.style(Style::default().bg(Color::LightBlue));
+            }
+            row
+        })
+        .collect();
+
+    // Combine headers and data rows into a single table
+    let mut table_rows = Vec::new();
+    table_rows.push(header_row_names);
+    table_rows.extend(rows);
+
+    let widths: Vec<Constraint> = app
+        .custom_query_result_columns
+        .iter()
+        .map(|_| Constraint::Percentage(100 / app.custom_query_result_columns.len().max(1) as u16))
+        .collect();
+
+    let table = Table::new(table_rows, widths).block(Block::default().borders(Borders::ALL).title(
+        format!(
+            "Query Results (Page {}/{})",
+            app.custom_query_current_page + 1,
+            app.custom_query_max_page
+        ),
+    ));
+
+    f.render_stateful_widget(table, area, &mut app.table_data_state);
+
+    let help_text = Paragraph::new(Span::raw(
+        "Use ↑↓ to navigate rows, PageUp/PageDown to change pages, 's' for query input, 't' for tables, 'c' for connections, ESC for back, 'q' to quit",
+    ))
+    .block(Block::default().borders(Borders::NONE))
+    .style(Style::default().add_modifier(Modifier::ITALIC));
 
     // Position help text at the bottom
     let help_area = ratatui::layout::Rect {
@@ -808,6 +1090,35 @@ mod tests {
         // Test previous_row when on first item - should wrap to last
         app.previous_row();
         assert_eq!(app.table_data_state.selected(), Some(2));
+    }
+
+    #[test]
+    fn test_navigation_in_custom_query_results() {
+        let mut app = App::new().unwrap();
+
+        // Set state to CustomQuery and add mock custom query data
+        app.state = AppState::CustomQuery;
+        app.custom_query_result_data = vec![
+            vec!["query_row1_col1".to_string(), "query_row1_col2".to_string()],
+            vec!["query_row2_col1".to_string(), "query_row2_col2".to_string()],
+            vec!["query_row3_col1".to_string(), "query_row3_col2".to_string()],
+        ];
+        app.table_data_state.select(Some(0));
+
+        // Test next_row in custom query mode
+        app.next_row();
+        assert_eq!(app.table_data_state.selected(), Some(1));
+
+        // Test previous_row in custom query mode
+        app.previous_row();
+        assert_eq!(app.table_data_state.selected(), Some(0));
+
+        // Test wrapping behavior
+        app.previous_row();
+        assert_eq!(app.table_data_state.selected(), Some(2)); // Should wrap to last
+
+        app.next_row();
+        assert_eq!(app.table_data_state.selected(), Some(0)); // Should wrap to first
     }
 
     #[test]

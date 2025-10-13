@@ -138,6 +138,109 @@ impl DatabaseConnection {
 
         Ok(row.get(0))
     }
+
+    pub async fn execute_custom_query(
+        &self,
+        query: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<String>, Vec<Vec<String>>)> {
+        // For SELECT queries, we'll wrap the query to ensure all columns are converted to text
+        let limited_query = if query.to_lowercase().trim().starts_with("select") {
+            // Get the column names from the original query
+            let base_query = query.trim_end_matches(';');
+
+            // Execute a limited version of the query to get column information
+            let column_query = format!("{} LIMIT 1", base_query);
+            let column_rows = self
+                .client
+                .query(&column_query, &[])
+                .await
+                .map_err(|e| anyhow!("Failed to get column information: {}", e))?;
+
+            if column_rows.is_empty() {
+                // If no rows, just execute the original query with limit/offset
+                format!("{} LIMIT {} OFFSET {}", base_query, limit, offset)
+            } else {
+                // Get column names and build a query that converts all columns to text
+                let columns = column_rows[0]
+                    .columns()
+                    .iter()
+                    .map(|col| col.name())
+                    .collect::<Vec<_>>();
+
+                let select_columns = columns
+                    .iter()
+                    .map(|col| format!("{}::text", col))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                format!(
+                    "SELECT {} FROM ({} LIMIT {} OFFSET {}) AS text_query",
+                    select_columns, base_query, limit, offset
+                )
+            }
+        } else {
+            // For non-SELECT queries (INSERT, UPDATE, DELETE), just execute as-is
+            query.to_string()
+        };
+
+        // Execute the query
+        let rows = self
+            .client
+            .query(&limited_query, &[])
+            .await
+            .map_err(|e| anyhow!("Failed to execute custom query: {}", e))?;
+
+        // Get column names from the result
+        let columns = if !rows.is_empty() {
+            rows[0]
+                .columns()
+                .iter()
+                .map(|col| col.name().to_string())
+                .collect()
+        } else {
+            // If no rows returned, we need to determine columns differently
+            // For now, return empty columns
+            Vec::new()
+        };
+
+        // Convert rows to string data using the same approach as get_table_data
+        let mut data = Vec::new();
+        for row in rows {
+            let mut row_data = Vec::new();
+            for i in 0..row.len() {
+                // Use the same simple approach as get_table_data
+                let value: Option<String> = row.get(i);
+                row_data.push(value.unwrap_or_else(|| "NULL".to_string()));
+            }
+            data.push(row_data);
+        }
+
+        Ok((columns, data))
+    }
+
+    pub async fn get_query_row_count(&self, query: &str) -> Result<i64> {
+        // For SELECT queries, try to get the count
+        if query.to_lowercase().trim().starts_with("select") {
+            // Extract the FROM clause and create a count query
+            let count_query = format!(
+                "SELECT COUNT(*) FROM ({}) AS count_query",
+                query.trim_end_matches(';')
+            );
+
+            match self.client.query_one(&count_query, &[]).await {
+                Ok(row) => Ok(row.get(0)),
+                Err(_) => {
+                    // If count query fails, return a default value
+                    Ok(0)
+                }
+            }
+        } else {
+            // For non-SELECT queries, return 0
+            Ok(0)
+        }
+    }
 }
 
 #[cfg(test)]
