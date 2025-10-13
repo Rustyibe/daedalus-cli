@@ -10,6 +10,14 @@ Craft Your Path in the Data Labyrinth.
 
 Daedalus CLI is a Rust-based command-line interface tool for PostgreSQL database management and exploration. It provides an intuitive terminal user interface (TUI) that allows users to connect to PostgreSQL databases, browse tables, and view data with pagination support.
 
+## Cross-Platform Support
+
+Daedalus CLI is now fully cross-platform compatible, supporting Windows, macOS, and Linux systems. Key improvements include:
+
+- **Cross-platform home directory support**: Uses the `dirs` crate to properly locate the user's home directory on all platforms
+- **Fixed Windows config directory issue**: Ensures the configuration directory (`.daedalus-cli`) is created in the user's home directory rather than the current working directory on Windows
+- **Improved cross-platform compatibility**: Replaced `tempdir` with `tempfile` for better temporary file handling across platforms
+
 ## Features
 
 - **Database Connection Management**: Add, list, and remove saved database connections with encrypted storage of connection information in `~/.daedalus-cli/config.json`
@@ -18,6 +26,7 @@ Daedalus CLI is a Rust-based command-line interface tool for PostgreSQL database
 - **Pagination Support**: Navigate large datasets using PageUp/PageDown keys
 - **Custom SQL Queries**: Execute custom SQL queries directly from the TUI with result pagination
 - **Secure Storage**: AES-256-GCM encryption for storing sensitive connection password information
+- **Cross-Platform Compatibility**: Full support for Windows, macOS, and Linux systems with consistent behavior
 
 ## Installation
 
